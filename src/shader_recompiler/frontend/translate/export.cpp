@@ -47,7 +47,7 @@ static u32 MaskFromExportFormat(u8 mask, AmdGpu::ShaderExportFormat export_forma
     }
 }
 
-void Translator::ExportRenderTarget(const GcnInst& inst) {
+inline void Translator::ExportRenderTarget(const GcnInst& inst) {
     const auto& exp = inst.control.exp;
     const IR::Attribute mrt{exp.target};
     info.mrt_mask |= 1u << static_cast<u8>(mrt);
@@ -106,19 +106,27 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
     // Swizzle components and export
     for (u32 i = 0; i < 4; ++i) {
         const auto swizzled_comp = components[color_buffer.swizzle.Map(i)];
+        IR::F32 value_to_write;
+
         if (swizzled_comp.IsEmpty()) {
-            continue;
+            // AMD GCN hardware defaults unwritten components to 0.0 for RGB, 1.0 for Alpha.
+            // This is critical for AMD drivers which may not handle undefined values gracefully,
+            // leading to black artifacts or other rendering issues (e.g., Issue #3752).
+            value_to_write = (i == 3) ? ir.Imm32(1.0f) : ir.Imm32(0.0f);
+        } else {
+            auto converted = ApplyWriteNumberConversion(ir, swizzled_comp, color_buffer.num_conversion);
+            if (needs_unorm_fixup) {
+                // FIXME: Fix-up for GPUs where float-to-unorm rounding is off from expected.
+                converted = ir.FPSub(converted, ir.Imm32(1.f / 127500.f));
+            }
+            value_to_write = converted;
         }
-        auto converted = ApplyWriteNumberConversion(ir, swizzled_comp, color_buffer.num_conversion);
-        if (needs_unorm_fixup) {
-            // FIXME: Fix-up for GPUs where float-to-unorm rounding is off from expected.
-            converted = ir.FPSub(converted, ir.Imm32(1.f / 127500.f));
-        }
-        ir.SetAttribute(mrt, converted, i);
+
+        ir.SetAttribute(mrt, value_to_write, i);
     }
 }
 
-void Translator::ExportDepth(const GcnInst& inst) {
+inline void Translator::ExportDepth(const GcnInst& inst) {
     const auto& exp = inst.control.exp;
     if (exp.en == 0) {
         // No export
@@ -165,7 +173,7 @@ void Translator::ExportDepth(const GcnInst& inst) {
     }
 }
 
-void Translator::EmitExport(const GcnInst& inst) {
+inline void Translator::EmitExport(const GcnInst& inst) {
     if (info.stage == Stage::Fragment && inst.control.exp.vm) {
         ir.Discard(ir.LogicalNot(ir.GetExec()));
     }
