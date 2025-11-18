@@ -114,7 +114,8 @@ void Translator::ExportRenderTarget(const GcnInst& inst) {
             // leading to black artifacts or other rendering issues (e.g., Issue #3752).
             value_to_write = (i == 3) ? ir.Imm32(1.0f) : ir.Imm32(0.0f);
         } else {
-            auto converted = ApplyWriteNumberConversion(ir, swizzled_comp, color_buffer.num_conversion);
+            auto converted =
+                ApplyWriteNumberConversion(ir, swizzled_comp, color_buffer.num_conversion);
             if (needs_unorm_fixup) {
                 // FIXME: Fix-up for GPUs where float-to-unorm rounding is off from expected.
                 converted = ir.FPSub(converted, ir.Imm32(1.f / 127500.f));
